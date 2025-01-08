@@ -22,10 +22,20 @@ class CustomEncoder(json.JSONEncoder):
         return super().default(obj)  # Use default serialization for other types
 
 # Function to index videos by uploading them to Azure Video Indexer
-def index_videos(client: VideoIndexerClient, blobs, container_client, privacy: str = 'private', excluded_ai=None) -> dict[str, str]:
+def index_videos(client: VideoIndexerClient, blobs, container_client, cache_file: Path, privacy: str = 'private', excluded_ai=None) -> dict[str, str]:
     start = time.time()
     videos_ids = {}
+
+    # Load cached video IDs if available
+    if cache_file.exists():
+        with cache_file.open('r') as f:
+            videos_ids = json.load(f)
+
     for blob in blobs:
+        if blob.name in videos_ids:
+            print(f"Video {blob.name} already processed with ID {videos_ids[blob.name]}. Skipping upload.")
+            continue
+
         blob_client = container_client.get_blob_client(blob.name)
         video_url = blob_client.url
         print(f"Checking if video exists: {blob.name}")
@@ -45,6 +55,10 @@ def index_videos(client: VideoIndexerClient, blobs, container_client, privacy: s
             except Exception as e:
                 print(f"Failed to upload video {blob.name}: {e}")
 
+    # Save cached video IDs
+    with cache_file.open('w') as f:
+        json.dump(videos_ids, f, cls=CustomEncoder)
+
     print(f"Videos uploaded: {videos_ids}, took {time.time() - start} seconds")
     return videos_ids
 
@@ -52,10 +66,10 @@ def index_videos(client: VideoIndexerClient, blobs, container_client, privacy: s
 def wait_for_videos_processing_and_save_insights(client: VideoIndexerClient, videos_ids: dict[str, str], container_client, timeout: int = 600):
     for video_name, video_id in videos_ids.items():
         try:
-            print(f"Waiting for video {video_name} with ID {video_id} to be processed.")
+            print(f"Checking if video {video_id} has finished indexing...")
             client.wait_for_index_async(video_id, timeout_sec=timeout)
             print(f"Retrieving insights for video {video_name} with ID {video_id}.")
-            insights = client.get_video_index(video_id)
+            insights = client.get_video_async(video_id)
             insights_blob_client = container_client.get_blob_client(f"{video_name}_insights.json")
             insights_blob_client.upload_blob(json.dumps(insights), overwrite=True)
             print(f"Saved insights for video {video_name} with ID {video_id}")
@@ -128,9 +142,9 @@ def prepare_db(db_name, language_models: OpenAI, prompt_content_db: PromptConten
                 print("Checking for content in Azure AI Search:")
                 # Add logic to check for content in Azure AI Search
                 # Example: List all documents in the Azure AI Search index
-                #documents = prompt_content_db.list_all_documents()
-                #for doc in documents:
-                #    print(f"Document ID: {doc['id']}, Content: {doc['content']}")
+                documents = prompt_content_db.list_all_documents()
+                for doc in documents:
+                    print(f"Document ID: {doc['id']}, Content: {doc['content']}")
             except Exception as e:
                 print(f"Dry run: Failed to connect to Azure AI Search. Error: {e}")
 
@@ -143,7 +157,7 @@ def prepare_db(db_name, language_models: OpenAI, prompt_content_db: PromptConten
         else:
             # Index videos by uploading them to Azure Video Indexer
             print("Indexing videos by uploading them to Azure Video Indexer")
-            videos_ids = index_videos(client, blobs, container_client, privacy='public')
+            videos_ids = index_videos(client, blobs, container_client, video_ids_cache_file, privacy='public')
             if use_videos_ids_cache:
                 print(f"Saving videos IDs to {video_ids_cache_file}")
                 video_ids_cache_file.write_text(json.dumps(videos_ids, cls=CustomEncoder))
@@ -152,8 +166,28 @@ def prepare_db(db_name, language_models: OpenAI, prompt_content_db: PromptConten
         print("Waiting for videos to be processed by Azure Video Indexer and saving insights")
         wait_for_videos_processing_and_save_insights(client, videos_ids, container_client, timeout=600)
 
-        # Get indexed videos prompt content
+        # Retry mechanism for generating prompt content
         print("Getting indexed videos prompt content")
+        for video_id in videos_ids.values():
+            retries = 5
+            while retries > 0:
+                try:
+                    response = client.generate_prompt_content_async(video_id)
+                    if response.status_code == 202:
+                        print(f"Prompt content generation for video ID {video_id} is still in progress. Retrying...")
+                        time.sleep(60)  # Wait for 60 seconds before retrying
+                        retries -= 1
+                    elif response.status_code == 409:
+                        print(f"Prompt content generation for video ID {video_id} is already in progress. Retrying...")
+                        time.sleep(60)  # Wait for 60 seconds before retrying
+                        retries -= 1
+                    else:
+                        response.raise_for_status()
+                        break
+                except Exception as e:
+                    print(f"Failed to generate prompt content for video ID {video_id}. Error: {e}")
+                    retries -= 1
+
         try:
             videos_prompt_content = client.get_collection_prompt_content(list(videos_ids.values()))
         except Exception as e:
@@ -167,6 +201,7 @@ def prepare_db(db_name, language_models: OpenAI, prompt_content_db: PromptConten
         # Generate sections of prompt content
         print("Generating sections of prompt content")
         account_details = client.get_account_details()
+        print(f"Account details: {account_details}")  # Add debugging information
         sections_generator = get_sections_generator(videos_prompt_content, account_details, embedding_cb=language_models.get_text_embeddings,
                                                     embeddings_col_name=VECTOR_FIELD_NAME)
 
