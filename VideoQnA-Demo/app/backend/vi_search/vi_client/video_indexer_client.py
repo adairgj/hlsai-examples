@@ -57,8 +57,16 @@ class VideoIndexerClient:
         '''
         Get details about the Video Indexer account.
         '''
-        self.get_account_async()  # Ensure the account is initialized
-        return self.account
+        url = f"{self.api_url}/Accounts/{self.account_id}/Details"
+        headers = {
+            "Ocp-Apim-Subscription-Key": self.access_token
+        }
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        account_details = response.json()
+        account_details['account_id'] = self.account_id  # Ensure account_id is included
+        return account_details
+
 
     def video_exists(self, video_name: str) -> Optional[str]:
         '''
