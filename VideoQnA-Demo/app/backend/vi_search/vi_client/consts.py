@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 
-
 @dataclass
 class Consts:
     ApiVersion: str
@@ -11,7 +10,5 @@ class Consts:
     SubscriptionId: str
 
     def __post_init__(self):
-        if self.AccountName is None or self.AccountName == '' \
-            or self.ResourceGroup is None or self.ResourceGroup == '' \
-            or self.SubscriptionId is None or self.SubscriptionId == '':
+        if not self.SubscriptionId or not self.AccountName or not self.ResourceGroup:
             raise ValueError('Please Fill In SubscriptionId, Account Name and Resource Group on the Constant Class!')

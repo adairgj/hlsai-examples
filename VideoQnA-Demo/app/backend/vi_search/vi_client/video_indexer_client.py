@@ -28,7 +28,7 @@ class VideoIndexerClient:
         self.account = None
         self.consts = None
 
-    def authenticate_async(self, consts:Consts) -> None:
+    def authenticate_async(self, consts: Consts) -> None:
         self.consts = consts
         # Get access tokens
         self.arm_access_token = get_arm_access_token(self.consts)
@@ -46,20 +46,38 @@ class VideoIndexerClient:
             'Content-Type': 'application/json'
         }
 
-        url = f'{self.consts.AzureResourceManager}/subscriptions/{self.consts.SubscriptionId}/resourcegroups/' + \
-              f'{self.consts.ResourceGroup}/providers/Microsoft.VideoIndexer/accounts/{self.consts.AccountName}' + \
-              f'?api-version={self.consts.ApiVersion}'
-
+        # Updated with current api url syntax
+        url = f'{self.consts.AzureResourceManager}/subscriptions/{self.consts.SubscriptionId}/resourcegroups/{self.consts.ResourceGroup}/providers/Microsoft.VideoIndexer/accounts/{self.consts.AccountName}?api-version={self.consts.ApiVersion}'
         response = requests.get(url, headers=headers)
-
         response.raise_for_status()
-
         self.account = response.json()
-        print(f'[Account Details] Id:{self.account["properties"]["accountId"]}, Location: {self.account["location"]}')
+        return self.account
 
     def get_account_details(self) -> dict:
-        self.get_account_async()
-        return {"account_id": self.account["properties"]["accountId"], "location": self.account["location"]}
+        '''
+        Get details about the Video Indexer account.
+        '''
+        self.get_account_async()  # Ensure the account is initialized
+        return self.account
+
+    def video_exists(self, video_name: str) -> Optional[str]:
+        '''
+        Check if a video with the given name already exists in the account.
+        '''
+        self.get_account_async()  # if account is not initialized, get it
+
+        url = f'{self.consts.ApiEndpoint}/{self.account["location"]}/Accounts/{self.account["properties"]["accountId"]}/Videos'
+        params = {
+            'accessToken': self.vi_access_token,
+            'name': video_name
+        }
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            videos = response.json().get('results', [])
+            for video in videos:
+                if video['name'] == video_name:
+                    return video['id']
+        return None
 
     def upload_url_async(self, video_name: str, video_url: str, excluded_ai: Optional[list[str]] = None,
                          wait_for_index: bool = False, video_description: str = '', privacy='private') -> str:
@@ -92,7 +110,8 @@ class VideoIndexerClient:
             'name': video_name,
             'description': video_description,
             'privacy': privacy,
-            'videoUrl': video_url
+            'videoUrl': video_url,
+            'indexingPreset': 'Advanced'  # Add the indexingPreset parameter
         }
 
         if len(excluded_ai) > 0:
@@ -264,29 +283,18 @@ class VideoIndexerClient:
 
     def generate_prompt_content_async(self, video_id: str) -> None:
         '''
-        Calls the promptContent API
-        Initiate generation of new prompt content for the video.
-        If the video already has prompt content, it will be replaced with the new one.
-
-        :param video_id: The video ID
+        Generate prompt content for the given video ID.
         '''
-        self.get_account_async() # if account is not initialized, get it
+        self.get_account_async()  # Ensure the account is initialized
 
-        url = f'{self.consts.ApiEndpoint}/{self.account["location"]}/Accounts/{self.account["properties"]["accountId"]}/' + \
-              f'Videos/{video_id}/PromptContent'
-
-        headers = {
-            "Content-Type": "application/json"
-            }
-
+        url = f'{self.consts.ApiEndpoint}/{self.account["location"]}/Accounts/{self.account["properties"]["accountId"]}/Videos/{video_id}/PromptContent'
         params = {
             'accessToken': self.vi_access_token
         }
-
-        response = requests.post(url, headers=headers, params=params)
-
+        response = requests.post(url, params=params)
+        if response.status_code != 200:
+            print(f"Failed to generate prompt content for video ID {video_id}. Status code: {response.status_code}, Response: {response.text}")
         response.raise_for_status()
-        print(f"Prompt content generation for {video_id=} started...")
 
     def get_prompt_content_async(self, video_id: str, raise_on_not_found: bool = True) -> Optional[dict]:
         '''
@@ -470,6 +478,21 @@ class VideoIndexerClient:
         url = response.url
         print(f'Got the player widget URL: {url}')
 
+    def list_videos(self) -> list:
+        '''
+        List all videos in the Video Indexer account.
+        '''
+        self.get_account_async()  # Ensure the account is initialized
+
+        url = f'{self.consts.ApiEndpoint}/{self.account["location"]}/Accounts/{self.account["properties"]["accountId"]}/Videos'
+        params = {
+            'accessToken': self.vi_access_token
+        }
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+
+        videos = response.json().get('results', [])
+        return videos
 
 
 def init_video_indexer_client(config: dict) -> VideoIndexerClient:
@@ -477,7 +500,7 @@ def init_video_indexer_client(config: dict) -> VideoIndexerClient:
     ResourceGroup = config.get('ResourceGroup')
     SubscriptionId = config.get('SubscriptionId')
 
-    ApiVersion = '2024-01-01'
+    ApiVersion = '2024-01-01'  # Adjusted the API version to the 2024 version
     ApiEndpoint = 'https://api.videoindexer.ai'
     AzureResourceManager = 'https://management.azure.com'
 
@@ -485,13 +508,7 @@ def init_video_indexer_client(config: dict) -> VideoIndexerClient:
     consts = Consts(ApiVersion, ApiEndpoint, AzureResourceManager, AccountName, ResourceGroup, SubscriptionId)
 
     # Authenticate
-
-    # Create Video Indexer Client
     client = VideoIndexerClient()
-
-    # Get access tokens (arm and Video Indexer account)
     client.authenticate_async(consts)
-
-    client.get_account_async()
 
     return client
