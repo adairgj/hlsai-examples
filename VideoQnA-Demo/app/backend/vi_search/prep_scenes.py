@@ -17,10 +17,12 @@ def get_sections_generator(videos_prompt_content, account_details, embedding_cb,
     ''' Returns a generator of sections. '''
 
     # Debugging statement to check the contents of account_details
-    print("Account details:", account_details)
+    print("Get sections generator function: Account details:", account_details)
+    # Check if 'account_id' is in account_details
+    print("Account ID:", account_details.get('account_id', 'Not Found'))
     
-    if 'account_id' not in account_details:
-        raise KeyError("The key 'account_id' is missing from account_details. This is defined in in the video_indexer.py file.")
+    #if 'account_id' not in account_details:
+    #    raise KeyError("The key 'account_id' is missing from account_details. This is defined in in the video")
 
     for video_id, video_name, partition, section_index, section in prompt_content_generator(videos_prompt_content):
         content = section['content']

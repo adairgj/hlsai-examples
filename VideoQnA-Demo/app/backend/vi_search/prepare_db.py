@@ -1,6 +1,11 @@
+import sys
+from pathlib import Path
+
+# Add the backend directory to the Python path
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+
 import os
 import json
-from pathlib import Path
 import time
 from azure.storage.blob import BlobServiceClient, ContainerClient
 from dotenv import load_dotenv
@@ -117,6 +122,7 @@ def prepare_db(db_name, language_models: OpenAI, prompt_content_db: PromptConten
             try:
                 print("Testing connection to Azure Video Indexer")
                 account_details = client.get_account_details()
+                print(f"Account details: {account_details}")  # Add debugging information
                 print("Dry run: Successfully connected to Azure Video Indexer.")
                 print("Listing videos in Azure Video Indexer:")
                 videos = client.list_videos()

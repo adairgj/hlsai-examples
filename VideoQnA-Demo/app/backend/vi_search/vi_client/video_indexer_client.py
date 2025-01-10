@@ -4,6 +4,7 @@ import requests
 import time
 from typing import Optional
 from urllib.parse import urlparse
+from tenacity import retry, stop_after_attempt, wait_random_exponential
 
 from .consts import Consts
 from .account_token_provider import get_arm_access_token, get_account_access_token_async
@@ -57,16 +58,38 @@ class VideoIndexerClient:
         '''
         Get details about the Video Indexer account.
         '''
-        url = f"{self.api_url}/Accounts/{self.account_id}/Details"
+        url = f'{self.consts.AzureResourceManager}/subscriptions/{self.consts.SubscriptionId}/resourcegroups/{self.consts.ResourceGroup}/providers/Microsoft.VideoIndexer/accounts/{self.consts.AccountName}?api-version={self.consts.ApiVersion}'
         headers = {
-            "Ocp-Apim-Subscription-Key": self.access_token
+            "Authorization": "Bearer " + self.arm_access_token,
+            'Content-Type': 'application/json'
         }
         response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        account_details = response.json()
-        account_details['account_id'] = self.account_id  # Ensure account_id is included
-        return account_details
 
+        if response.status_code == 401:
+            error_message = response.json()
+            if error_message.get("error", {}).get("code") == "ExpiredAuthenticationToken":
+                print(f"Failed to get account details: {response.status_code} - {response.text}")
+                # Refresh the token here
+                self.vi_access_token = self.refresh_access_token()
+                # Retry the request
+                headers["Ocp-Apim-Subscription-Key"] = self.vi_access_token
+                response = requests.get(url, headers=headers)
+
+        if response.status_code == 200:
+            account_details = response.json()
+            account_details['account_id'] = self.account['properties']['accountId']  # Ensure account_id is included
+            return account_details
+        else:
+            response.raise_for_status()
+
+    def refresh_access_token(self) -> str:
+        '''
+        Refresh the access token.
+        '''
+        # Implement the logic to refresh the access token here
+        # For example, you might call a function to get a new token
+        new_token = get_account_access_token_async(self.consts, self.arm_access_token)
+        return new_token
 
     def video_exists(self, video_name: str) -> Optional[str]:
         '''
@@ -231,7 +254,9 @@ class VideoIndexerClient:
 
             if video_state == 'Processed':
                 processing = False
-                print(f'The video index has completed. Here is the full JSON of the index for video ID {video_id}: \n{video_result}')
+                # The full json is very verbose
+                # print(f'The video index has completed. Here is the full JSON of the index for video ID {video_id}: \n{video_result}')
+                print(f'The video index has completed for video ID {video_id}.')
                 break
             elif video_state == 'Failed':
                 processing = False
@@ -289,20 +314,46 @@ class VideoIndexerClient:
         print(f'Here are the search results: \n{search_result}')
         return search_result
 
-    def generate_prompt_content_async(self, video_id: str) -> None:
+    @retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
+    def generate_prompt_content_async(self, video_id):
         '''
-        Generate prompt content for the given video ID.
+        Generate prompt content for a video asynchronously.
         '''
-        self.get_account_async()  # Ensure the account is initialized
+        try:
+            url = f"{self.consts.ApiEndpoint}/{self.account['location']}/Accounts/{self.account['properties']['accountId']}/Videos/{video_id}/PromptContent"
+            headers = {
+                "Ocp-Apim-Subscription-Key": self.vi_access_token,
+                "Content-Type": "application/json"
+            }
+            response = requests.post(url, headers=headers)
 
-        url = f'{self.consts.ApiEndpoint}/{self.account["location"]}/Accounts/{self.account["properties"]["accountId"]}/Videos/{video_id}/PromptContent'
-        params = {
-            'accessToken': self.vi_access_token
-        }
-        response = requests.post(url, params=params)
-        if response.status_code != 200:
-            print(f"Failed to generate prompt content for video ID {video_id}. Status code: {response.status_code}, Response: {response.text}")
-        response.raise_for_status()
+            if response.status_code == 202:
+                print(f"Prompt content generation for video ID {video_id} is still in progress. Retrying...")
+                raise Exception("Prompt content generation in progress")
+            elif response.status_code == 409:
+                print(f"Prompt content generation for video ID {video_id} is already in progress. Retrying...")
+                raise Exception("Prompt content generation already in progress")
+            elif response.status_code != 200:
+                response.raise_for_status()
+
+            return response.json()
+        except AttributeError as e:
+            print(f"AttributeError: {e}")
+            raise
+
+    def get_collection_prompt_content(self, video_ids):
+        '''
+        Get prompt content for a collection of videos.
+        '''
+        prompt_content = {}
+        for video_id in video_ids:
+            try:
+                content = self.generate_prompt_content_async(video_id)
+                prompt_content[video_id] = content
+            except Exception as e:
+                print(f"Failed to generate prompt content for video ID {video_id}. Error: {e}")
+
+        return prompt_content
 
     def get_prompt_content_async(self, video_id: str, raise_on_not_found: bool = True) -> Optional[dict]:
         '''
