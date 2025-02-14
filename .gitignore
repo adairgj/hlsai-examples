@@ -8,6 +8,7 @@
 *.user
 *.userosscache
 *.sln.docstates
+*.ps1
 
 #terraform 
 .terraform/
@@ -203,6 +204,11 @@ csx/
 # Microsoft Azure Emulator
 ecf/
 rcf/
+
+# Microsoft Azure Build files
+.env
+.azure/*
+.devcontainer/*
 
 # Windows Store app package directories and files
 AppPackages/
