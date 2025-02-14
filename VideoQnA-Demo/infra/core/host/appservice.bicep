@@ -1,5 +1,5 @@
 param name string
-param location string = resourceGroup().location
+param appServicesLocation string
 param tags object = {}
 
 // Reference Properties
@@ -37,7 +37,7 @@ param healthCheckPath string = ''
 
 resource appService 'Microsoft.Web/sites@2022-03-01' = {
   name: name
-  location: location
+  location: appServicesLocation
   tags: tags
   kind: kind
   properties: {

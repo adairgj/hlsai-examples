@@ -9,6 +9,12 @@ param environmentName string
 @description('Primary location for all resources')
 param location string
 
+@description('Location for the App Service Plan')
+param appServicePlanLocation string
+
+@description('Location for the App Services')
+param appServicesLocation string
+
 param appServicePlanName string = ''
 param backendServiceName string = ''
 param resourceGroupName string = ''
@@ -18,7 +24,7 @@ param searchServiceResourceGroupName string = ''
 param searchServiceResourceGroupLocation string = ''
 
 param searchServiceSkuName string = 'standard'
-param searchIndexName string = 'gptkbindex'
+param searchIndexName string = 'prompt-content-indexdb'
 
 param openAiServiceName string = ''
 param openAiResourceGroupName string = ''
@@ -31,8 +37,6 @@ param azureSearchKey string = ''
 param promptContentDbName string = ''
 param promptContentDb string = ''
 param languageModel string = ''
-
-
 
 @description('Id of the user or app to assign application roles')
 param principalId string = ''
@@ -62,10 +66,13 @@ module appServicePlan 'core/host/appserviceplan.bicep' = {
   scope: resourceGroup
   params: {
     name: !empty(appServicePlanName) ? appServicePlanName : '${abbrs.webServerFarms}${resourceToken}'
-    location: location
+    appServicePlanLocation: appServicePlanLocation
     tags: tags
     sku: {
       name: 'B1'
+      tier: 'Basic'
+      size: 'B1'
+      family: 'B'
       capacity: 1
     }
     kind: 'linux'
@@ -78,7 +85,7 @@ module backend 'core/host/appservice.bicep' = {
   scope: resourceGroup
   params: {
     name: !empty(backendServiceName) ? backendServiceName : '${abbrs.webSitesAppService}backend-${resourceToken}'
-    location: location
+    appServicesLocation: appServicesLocation
     tags: union(tags, { 'azd-service-name': 'backend' })
     appServicePlanId: appServicePlan.outputs.id
     runtimeName: 'python'

@@ -9,7 +9,7 @@
       "value": "${AZURE_LOCATION}"
     },
     "resourceGroupName": {
-      "value": "${AZURE_SEARCH_SERVICE_RESOURCE_GROUP}"
+      "value": "${AZURE_RESOURCE_GROUP}"
     },
     "principalId": {
       "value": "${AZURE_PRINCIPAL_ID}"

@@ -1,14 +1,14 @@
 param name string
-param location string = resourceGroup().location
+param appServicePlanLocation string
 param tags object = {}
 
-param kind string = ''
+param kind string = 'linux'
 param reserved bool = true
 param sku object
 
-resource appServicePlan 'Microsoft.Web/serverfarms@2022-03-01' = {
+resource appServicePlan 'Microsoft.Web/serverfarms@2024-04-01' = {
   name: name
-  location: location
+  location: appServicePlanLocation
   tags: tags
   sku: sku
   kind: kind
