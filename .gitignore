@@ -412,3 +412,4 @@ local.properties
 ##############################
 **/*id_rsa*
 VideoQnA-Demo/.env
+VideoQnA-Demo/app/backend/static/index.html
