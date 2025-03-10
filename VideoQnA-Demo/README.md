@@ -61,6 +61,13 @@ The repo includes sample data so it's ready to try end-to-end. The sample we use
    1. Note the deployment names to be used later in the process.
    1. Note API key under Resource management -> Keys and Endpoint to be used later in the process.
 
+1. **(Optional) Set up Blob storage for video files**
+
+   1. Create Azure Blob storage in a Storage Container
+   1. Create Container in the blob
+   1. Upload videos to container
+   1. Ensure your account has Storage Blob Data Contributor permissions to read the files once uploaded
+
 1. **Index video archive**
 
    1. Index videos in VI account.
@@ -99,12 +106,43 @@ The repo includes sample data so it's ready to try end-to-end. The sample we use
       pip install -r .\app\backend\requirements.txt
       ```
 
-   1. Create a `.env` file that holds your Azure AI Video Indexer details (taken from Azure portal) in the following format:
+   1. Create a `.env` file that holds your Azure AI Video Indexer, Azure OpenAI, Azure Blob details (taken from Azure portal) in the following format:
 
       ```
       AccountName='YOUR_VI_ACCOUNT_NAME' # This is the name of your Azure AI Video Indexer account.
       ResourceGroup='RESOURCE_GROUP_NAME' # This is the name of the resource group where your Azure AI Video Indexer account is located.
       SubscriptionId='SUBSCRIPTION_ID' # This is the ID of your Azure subscription.
+      AZURE_RESOURCE_GROUP= # default resource group for all resources
+      AZURE_SUBSCRIPTION_ID= # Subscription for resource group
+      AZURE_TENANT_ID= # tenant id
+      # Azure Blob Storage Configuration
+      USE_BLOB_STORAGE=true # Set to true if using blob
+      AZURE_STORAGE_CONNECTION_STRING= # Path to container including container name
+      USE_SAS_TOKEN=false # Set to true if using SAS token
+      AZURE_STORAGE_CONTAINER_NAME= # Set if using SAS token
+      AZURE_STORAGE_SAS_URL=  # If using SAS token
+      AZURE_SEARCH_KEY= # key
+      AZURE_SEARCH_SERVICE= # name of service
+      AZURE_SEARCH_LOCATION=  # region
+      AZURE_SEARCH_SERVICE_RESOURCE_GROUP= # allows for Search if in different resource group
+      # Azure app service plan location
+      AZURE_APP_SERVICES_LOCATION= # Allows app service in different region
+      AZURE_APP_SERVICEPLAN_LOCATION= # Allows app service plan in different region
+      # General Configuration
+      AZURE_SEARCH_INDEX= # name of index
+      PROMPT_CONTENT_DB_NAME= # Could be same as name for index
+      PROMPT_CONTENT_DB= # Set to azure_search if using Azure Search or chromadb
+      DRY_RUN=false # Set to true to test your connections
+
+      # Azure OpenAI Configuration
+      AZURE_OPENAI_API_KEY= # Key for OpenAI
+      AZURE_OPENAI_CHATGPT_DEPLOYMENT=  # gpt4o or other gpt deplyment
+      AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT=  # text-embedding-ada-002
+      AZURE_OPENAI_RESOURCE_GROUP= # resource group for openai
+      AZURE_OPENAI_SERVICE= # name of service
+
+      # Language Model Configuration
+      LANGUAGE_MODEL=openai # language model
       ```
 
    1. Save and run the following commands in PowerShell from the workspace root directory:
@@ -123,6 +161,8 @@ The repo includes sample data so it's ready to try end-to-end. The sample we use
       ```powershell
       cd .\app\backend\
       $env:PYTHONPATH += ";$(Get-Location)" # (to add the current directory to the Python path)
+      Write-Output $env:PYTHONPATH # verify path was updated
+      Get-ChildItem Env: # print all environment variables
       cd ..\..\
       python .\app\backend\vi_search\prepare_db.py # (to run the indexing into vector db script)
       ```
@@ -137,6 +177,32 @@ The repo includes sample data so it's ready to try end-to-end. The sample we use
    1. Run `azd up` command to setup the app service resources.
    1. Select subscription and location where to create the app service deployment.
    1. Run `azd deploy` command to deploy the app service and any further changes in the python app service code.
+
+1. **Configure AI Search for use in Copilot Studio (optional)**
+
+   1. Add data source
+      
+      ![Add data source](docs/create_data_source.png)
+      
+      1. Select storage account and container.  Check the box to "Authenticate using managed identity."
+      
+      ![Configure data source](docs/datasource_configuration.png)
+   
+   1. Add indexer
+      
+      ![Add indexer](docs/create_indexer.png)
+      
+      ![Configure indexer](docs/configure_indexer.png)
+   
+   1. Create vectorizer
+      
+      ![Edit profile](docs/edit_index_profile.png)
+      
+      ![Create vectorizer](docs/create_vectorizer.png)
+   
+   1. Update Semantic Configuration
+      
+      ![Add Title](docs/add_title_semantic_config.png)
 
 ## FAQ
 

@@ -31,6 +31,9 @@ bld/
 [Bb]in/
 [Oo]bj/
 [Ll]og/
+**/videos_ids_cache.json
+**/backend/static/**
+**/backend/static/index.html
 
 # Visual Studio 2015/2017 cache/options directory
 .vs/
@@ -209,6 +212,8 @@ rcf/
 .env
 .azure/*
 .devcontainer/*
+# Ignore the python virtual environment
+**/venv/*
 
 # Windows Store app package directories and files
 AppPackages/

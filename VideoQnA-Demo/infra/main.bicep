@@ -1,8 +1,8 @@
-targetScope = 'subscription'
+targetScope = 'resourceGroup'
 
 @minLength(1)
 @maxLength(64)
-@description('Name of the the environment which is used to generate a short unique hash used in all resources.')
+@description('Name of the environment which is used to generate a short unique hash used in all resources.')
 param environmentName string
 
 @minLength(1)
@@ -17,17 +17,12 @@ param appServicesLocation string
 
 param appServicePlanName string = ''
 param backendServiceName string = ''
-param resourceGroupName string = ''
 
-param searchServiceName string = ''
-param searchServiceResourceGroupName string = ''
-param searchServiceResourceGroupLocation string = ''
-
-param searchServiceSkuName string = 'standard'
+param searchServiceName string = 'hlsvideosearch'
 param searchIndexName string = 'prompt-content-indexdb'
 
-param openAiServiceName string = ''
-param openAiResourceGroupName string = ''
+param openAiServiceName string = 'videosearch-openai'
+param openAiResourceGroupName string = 'rg-training-video-search-engine'
 
 param chatGptDeploymentName string = 'gpt-4o'
 param embeddingsDeploymentName string = 'text-embedding-ada-002'
@@ -45,25 +40,9 @@ var abbrs = loadJsonContent('abbreviations.json')
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 var tags = { 'azd-env-name': environmentName }
 
-// Organize resources in a resource group
-resource resourceGroup 'Microsoft.Resources/resourceGroups@2021-04-01' = {
-  name: !empty(resourceGroupName) ? resourceGroupName : '${abbrs.resourcesResourceGroups}${environmentName}'
-  location: location
-  tags: tags
-}
-
-resource openAiResourceGroup 'Microsoft.Resources/resourceGroups@2021-04-01' existing = if (!empty(openAiResourceGroupName)) {
-  name: !empty(openAiResourceGroupName) ? openAiResourceGroupName : resourceGroup.name
-}
-
-resource searchServiceResourceGroup 'Microsoft.Resources/resourceGroups@2021-04-01' existing = if (!empty(searchServiceResourceGroupName)) {
-  name: !empty(searchServiceResourceGroupName) ? searchServiceResourceGroupName : resourceGroup.name
-}
-
 // Create an App Service Plan to group applications under the same payment plan and SKU
 module appServicePlan 'core/host/appserviceplan.bicep' = {
   name: 'appserviceplan'
-  scope: resourceGroup
   params: {
     name: !empty(appServicePlanName) ? appServicePlanName : '${abbrs.webServerFarms}${resourceToken}'
     appServicePlanLocation: appServicePlanLocation
@@ -79,10 +58,9 @@ module appServicePlan 'core/host/appserviceplan.bicep' = {
   }
 }
 
-// The application frontend
+// The application backend
 module backend 'core/host/appservice.bicep' = {
   name: 'web'
-  scope: resourceGroup
   params: {
     name: !empty(backendServiceName) ? backendServiceName : '${abbrs.webSitesAppService}backend-${resourceToken}'
     appServicesLocation: appServicesLocation
@@ -95,7 +73,7 @@ module backend 'core/host/appservice.bicep' = {
     appSettings: {
       AZURE_OPENAI_SERVICE: openAiServiceName
       AZURE_SEARCH_INDEX: searchIndexName
-      AZURE_SEARCH_SERVICE: searchService.outputs.name
+      AZURE_SEARCH_SERVICE: searchServiceName
       AZURE_OPENAI_CHATGPT_DEPLOYMENT: chatGptDeploymentName
       AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT: embeddingsDeploymentName
       AZURE_OPENAI_API_KEY: azureOpenaiApiKey
@@ -107,27 +85,8 @@ module backend 'core/host/appservice.bicep' = {
   }
 }
 
-module searchService 'core/search/search-services.bicep' = {
-  name: 'search-service'
-  scope: searchServiceResourceGroup
-  params: {
-    name: !empty(searchServiceName) ? searchServiceName : 'gptkb-${resourceToken}'
-    location: searchServiceResourceGroupLocation
-    tags: tags
-    authOptions: {
-      aadOrApiKey: {
-        aadAuthFailureMode: 'http401WithBearerChallenge'
-      }
-    }
-    sku: {
-      name: searchServiceSkuName
-    }
-    semanticSearch: 'free'
-  }
-}
 
 module searchRoleUser 'core/security/role.bicep' = {
-  scope: searchServiceResourceGroup
   name: 'search-role-user'
   params: {
     principalId: principalId
@@ -137,7 +96,6 @@ module searchRoleUser 'core/security/role.bicep' = {
 }
 
 module searchContribRoleUser 'core/security/role.bicep' = {
-  scope: searchServiceResourceGroup
   name: 'search-contrib-role-user'
   params: {
     principalId: principalId
@@ -147,7 +105,6 @@ module searchContribRoleUser 'core/security/role.bicep' = {
 }
 
 module searchSvcContribRoleUser 'core/security/role.bicep' = {
-  scope: searchServiceResourceGroup
   name: 'search-svccontrib-role-user'
   params: {
     principalId: principalId
@@ -157,7 +114,6 @@ module searchSvcContribRoleUser 'core/security/role.bicep' = {
 }
 
 module searchRoleBackend 'core/security/role.bicep' = {
-  scope: searchServiceResourceGroup
   name: 'search-role-backend'
   params: {
     principalId: backend.outputs.identityPrincipalId
@@ -168,18 +124,15 @@ module searchRoleBackend 'core/security/role.bicep' = {
 
 output AZURE_LOCATION string = location
 output AZURE_TENANT_ID string = tenant().tenantId
-output AZURE_RESOURCE_GROUP string = resourceGroup.name
 
 output AZURE_OPENAI_SERVICE string = openAiServiceName
-output AZURE_OPENAI_RESOURCE_GROUP string = openAiResourceGroup.name
+output AZURE_OPENAI_RESOURCE_GROUP string = openAiResourceGroupName
 output AZURE_OPENAI_CHATGPT_DEPLOYMENT string = chatGptDeploymentName
 output AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT string = embeddingsDeploymentName
 output AZURE_OPENAI_API_KEY string = azureOpenaiApiKey
 output AZURE_SEARCH_KEY string = azureSearchKey
 
 output AZURE_SEARCH_INDEX string = searchIndexName
-output AZURE_SEARCH_SERVICE string = searchService.outputs.name
-output AZURE_SEARCH_SERVICE_RESOURCE_GROUP string = searchServiceResourceGroup.name
 
 output BACKEND_URI string = backend.outputs.uri
 

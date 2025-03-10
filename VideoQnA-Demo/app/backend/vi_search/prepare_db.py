@@ -1,3 +1,7 @@
+# This script prepares the database for the VideoQnA-Demo by uploading videos to Azure Video Indexer, waiting for them to be processed, and saving insights to Blob Storage.
+# It then generates prompt content for the videos and adds them to the prompt content database.
+# You should run this from the VideoQnA-Demo directory using the command from Powershell `python .\app\backend\vi_search\prepare_db.py` or from the terminal `python app/backend/vi_search/prepare_db.py`.
+# You can also run this script from the Azure Function App by copying the code to the `__init__.py` file in the `vi_search` directory.
 import sys
 from pathlib import Path
 
@@ -16,7 +20,7 @@ from vi_search.prep_scenes import get_sections_generator
 from vi_search.prompt_content_db.prompt_content_db import PromptContentDB, VECTOR_FIELD_NAME
 from vi_search.vi_client.video_indexer_client import init_video_indexer_client, VideoIndexerClient  # Ensure correct import
 
-# Load environment variables from .env file
+# Load environment variables from .env file which is located in the VideoQnA-Demo directory. 
 load_dotenv(BASE_DIR / ".env")
 
 # Custom JSON encoder to handle Path objects
@@ -74,8 +78,11 @@ def wait_for_videos_processing_and_save_insights(client: VideoIndexerClient, vid
             print(f"Checking if video {video_id} has finished indexing...")
             client.wait_for_index_async(video_id, timeout_sec=timeout)
             print(f"Retrieving insights for video {video_name} with ID {video_id}.")
+            # Get video insights
             insights = client.get_video_async(video_id)
+            # Get Blob client for insights
             insights_blob_client = container_client.get_blob_client(f"{video_name}_insights.json")
+            # Save insights to Blob Storage
             insights_blob_client.upload_blob(json.dumps(insights), overwrite=True)
             print(f"Saved insights for video {video_name} with ID {video_id}")
         except Exception as e:
@@ -92,7 +99,7 @@ def print_env_variables():
 # Main function to prepare the database
 def prepare_db(db_name, language_models: OpenAI, prompt_content_db: PromptContentDB,  # Use the OpenAI class
                use_videos_ids_cache=True, video_ids_cache_file='videos_ids_cache.json', verbose=False,
-               use_blob_storage=False, blob_sas_url=None, blob_container_name=None, dry_run=False):
+               use_blob_storage=False, blob_sas_url=None, blob_container_name=None, dry_run=False, use_sas_token=True):
 
     print("Starting prepare_db function")
     video_ids_cache_file = Path(video_ids_cache_file)
@@ -106,11 +113,17 @@ def prepare_db(db_name, language_models: OpenAI, prompt_content_db: PromptConten
     print(f"USE_BLOB_STORAGE: {use_blob_storage}")
     print(f"AZURE_STORAGE_SAS_URL: {blob_sas_url}")
     print(f"AZURE_STORAGE_CONTAINER_NAME: {blob_container_name}")
+    print(f"USE_SAS_TOKEN: {use_sas_token}")
 
     # Check if using Azure Blob Storage for videos
-    if use_blob_storage and blob_sas_url and blob_container_name:
+    if use_blob_storage and blob_container_name:
         print("Using Azure Blob Storage for videos and insights")
-        container_client = ContainerClient.from_container_url(blob_sas_url)
+        if use_sas_token and blob_sas_url:
+            container_client = ContainerClient.from_container_url(blob_sas_url)
+        else:
+            blob_service_client = BlobServiceClient.from_connection_string(os.environ["AZURE_STORAGE_CONNECTION_STRING"])
+            container_client = blob_service_client.get_container_client(blob_container_name)
+        
         blobs = container_client.list_blobs()
 
         if dry_run:
@@ -145,12 +158,16 @@ def prepare_db(db_name, language_models: OpenAI, prompt_content_db: PromptConten
                 print("Testing connection to Azure AI Search")
                 prompt_content_db.create_db(db_name, vector_search_dimensions=embeddings_size)
                 print("Dry run: Successfully connected to Azure AI Search.")
-                print("Checking for content in Azure AI Search:")
+                # Add logic to check for content in Azure AI Search
+                # print("Checking for content in Azure AI Search:")
                 # Add logic to check for content in Azure AI Search
                 # Example: List all documents in the Azure AI Search index
-                documents = prompt_content_db.list_all_documents()
-                for doc in documents:
-                    print(f"Document ID: {doc['id']}, Content: {doc['content']}")
+                #documents = prompt_content_db.list_all_documents()
+                #if not documents:
+                #    print("No documents found in Azure AI Search.")
+                #else:
+                #    for doc in documents:
+                #        print(f"Document ID: {doc['id']}, Content: {doc['content']}")
             except Exception as e:
                 print(f"Dry run: Failed to connect to Azure AI Search. Error: {e}")
 
@@ -175,6 +192,13 @@ def prepare_db(db_name, language_models: OpenAI, prompt_content_db: PromptConten
         # Retry mechanism for generating prompt content
         print("Getting indexed videos prompt content")
         for video_id in videos_ids.values():
+            existing_content = client.get_prompt_content_async(video_id, raise_on_not_found=False)
+            if existing_content is not None:
+                print(f"Prompt content for video ID {video_id} already exists, skipping generation.")
+                continue
+
+            # Retry mechanism for generating prompt content
+            print("Getting indexed videos prompt content")
             retries = 5
             while retries > 0:
                 try:
@@ -257,8 +281,10 @@ def main():
     print(f"Use blob storage: {use_blob_storage}")
     blob_sas_url = os.environ.get("AZURE_STORAGE_SAS_URL")
     blob_container_name = os.environ.get("AZURE_STORAGE_CONTAINER_NAME")
+    use_sas_token = os.environ.get("USE_SAS_TOKEN", "true").lower() == "true"
     print(f"Blob SAS URL: {blob_sas_url}")
     print(f"Blob container name: {blob_container_name}")
+    print(f"Use SAS token: {use_sas_token}")
 
     # Initialize language models
     print("Initializing language models")
@@ -266,7 +292,7 @@ def main():
 
     # Prepare the database
     prepare_db(db_name, language_models, prompt_content_db, verbose=verbose,
-               use_blob_storage=use_blob_storage, blob_sas_url=blob_sas_url, blob_container_name=blob_container_name, dry_run=dry_run)
+               use_blob_storage=use_blob_storage, blob_sas_url=blob_sas_url, blob_container_name=blob_container_name, dry_run=dry_run, use_sas_token=use_sas_token)
 
 if __name__ == "__main__":
     main()

@@ -3,7 +3,7 @@ import re
 import requests
 import time
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote
 from tenacity import retry, stop_after_attempt, wait_random_exponential
 
 from .consts import Consts
@@ -58,12 +58,42 @@ class VideoIndexerClient:
         '''
         Get details about the Video Indexer account.
         '''
+        print("Uses ARM API...Getting account details for client.get_account_details...")
+        # Ensure account is populated. This avoids the NoneType error
+        if self.account is None:
+            self.get_account_async()
+
+        # Print each value to see what is set
+        #print(f"AzureResourceManager: {self.consts.AzureResourceManager}")
+        #print(f"SubscriptionId: {self.consts.SubscriptionId}")
+        #print(f"ResourceGroup: {self.consts.ResourceGroup}")
+        #print(f"AccountName: {self.consts.AccountName}")
+        #print(f"ApiVersion: {self.consts.ApiVersion}")
+        #print(f"ARM Access Token: {self.arm_access_token}")
         url = f'{self.consts.AzureResourceManager}/subscriptions/{self.consts.SubscriptionId}/resourcegroups/{self.consts.ResourceGroup}/providers/Microsoft.VideoIndexer/accounts/{self.consts.AccountName}?api-version={self.consts.ApiVersion}'
         headers = {
             "Authorization": "Bearer " + self.arm_access_token,
             'Content-Type': 'application/json'
         }
-        response = requests.get(url, headers=headers)
+        #print(f"Headers: {headers}")
+
+        # Add a try-except block to catch and print the error
+        try:
+            # Make the request (example using requests library)
+            import requests
+            response = requests.get(url, headers=headers)
+
+            # Check the response
+            #print(f"Response Status Code: {response.status_code}")
+            #print(f"Response Text: {response.text}")
+
+        except Exception as e:
+            print(f"Error: {e}")
+
+        # Print the traceback to see where the error occurs
+        import traceback
+        traceback.print_exc()
+        #response = requests.get(url, headers=headers)
 
         if response.status_code == 401:
             error_message = response.json()
@@ -72,7 +102,8 @@ class VideoIndexerClient:
                 # Refresh the token here
                 self.vi_access_token = self.refresh_access_token()
                 # Retry the request
-                headers["Ocp-Apim-Subscription-Key"] = self.vi_access_token
+                headers["Content-Type"] = "application/json"
+                headers["Authorization"] = "Bearer " + self.vi_access_token
                 response = requests.get(url, headers=headers)
 
         if response.status_code == 200:
@@ -95,6 +126,7 @@ class VideoIndexerClient:
         '''
         Check if a video with the given name already exists in the account.
         '''
+        print(f"Uses Operations API - Checking if video {video_name} exists in the account from client.video_exists(blob.name)...")
         self.get_account_async()  # if account is not initialized, get it
 
         url = f'{self.consts.ApiEndpoint}/{self.account["location"]}/Accounts/{self.account["properties"]["accountId"]}/Videos'
@@ -124,6 +156,8 @@ class VideoIndexerClient:
         :param privacy: The privacy mode of the video
         :return: Video Id of the video being indexed, otherwise throws exception
         '''
+        print(f"Uses Operations API - Uploading video video_name from client.upload_url_async(video_name=blob.name, video_url=video_url, excluded_ai=excluded_ai, privacy=privacy)...")
+
         if excluded_ai is None:
             excluded_ai = []
 
@@ -132,33 +166,40 @@ class VideoIndexerClient:
         if not parsed_url.scheme or not parsed_url.netloc:
             raise Exception(f'Invalid video URL: {video_url}')
 
+        # Remove any manual encoding/decoding
+        print("Original video URL:", video_url)  # Debug
+        final_url = unquote(video_url)
+        print("Final video URL:", final_url)  # Debug
         self.get_account_async() # if account is not initialized, get it
 
         url = f'{self.consts.ApiEndpoint}/{self.account["location"]}/Accounts/{self.account["properties"]["accountId"]}/Videos'
 
         params = {
-            'accessToken': self.vi_access_token,
             'name': video_name,
-            'description': video_description,
             'privacy': privacy,
-            'videoUrl': video_url,
-            'indexingPreset': 'Advanced'  # Add the indexingPreset parameter
+            'description': video_description,
+            'videoUrl': final_url,
+            'indexingPreset': 'Advanced',  # Add the indexingPreset parameter
+            'accessToken': self.vi_access_token
         }
 
         if len(excluded_ai) > 0:
             params['excludedAI'] = ','.join(excluded_ai)
 
-        response = requests.post(url, params=params)
+        try:
+            response = requests.post(url, params=params)
+            response.raise_for_status()
 
-        response.raise_for_status()
+            video_id = response.json().get('id')
+            print(f'Video ID {video_id} was uploaded successfully')
 
-        video_id = response.json().get('id')
-        print(f'Video ID {video_id} was uploaded successfully')
+            if wait_for_index:
+                self.wait_for_index_async(video_id)
 
-        if wait_for_index:
-            self.wait_for_index_async(video_id)
-
-        return video_id
+            return video_id
+        except requests.exceptions.RequestException as e:
+            print(f"Request failed: {e}")
+            raise
 
     def file_upload_async(self, media_path: str | Path, video_name: Optional[str] = None,
                           excluded_ai: Optional[list[str]] = None, video_description: str = '', privacy='private',
@@ -231,6 +272,7 @@ class VideoIndexerClient:
         :param language: The language to translate video insights
         :param timeout_sec: The timeout in seconds
         '''
+        print(f"Uses Operations API - Waiting for video index for video ID from client.wait_for_index_async(video_id, language=language, timeout_sec=timeout_sec)...")
         self.get_account_async() # if account is not initialized, get it
 
         url = f'{self.consts.ApiEndpoint}/{self.account["location"]}/Accounts/{self.account["properties"]["accountId"]}/' + \
@@ -295,6 +337,7 @@ class VideoIndexerClient:
 
         :param video_id: The video ID
         '''
+        print(f"Uses Operations API - Getting video for video ID from client.get_video_async(video_id)...")
         self.get_account_async() # if account is not initialized, get it
 
         print(f'Searching videos in account {self.account["properties"]["accountId"]} for video ID {video_id}.')
@@ -319,37 +362,70 @@ class VideoIndexerClient:
         '''
         Generate prompt content for a video asynchronously.
         '''
+        print(f"Uses Operations API - Generating prompt content for video ID from client.generate_prompt_content_async(video_id)...")
         try:
             url = f"{self.consts.ApiEndpoint}/{self.account['location']}/Accounts/{self.account['properties']['accountId']}/Videos/{video_id}/PromptContent"
-            headers = {
-                "Ocp-Apim-Subscription-Key": self.vi_access_token,
-                "Content-Type": "application/json"
+            params = {
+            'accessToken': self.vi_access_token
             }
-            response = requests.post(url, headers=headers)
+            response = requests.post(url, params=params)
 
             if response.status_code == 202:
                 print(f"Prompt content generation for video ID {video_id} is still in progress. Retrying...")
                 raise Exception("Prompt content generation in progress")
             elif response.status_code == 409:
-                print(f"Prompt content generation for video ID {video_id} is already in progress. Retrying...")
-                raise Exception("Prompt content generation already in progress")
+                error_message = response.json().get('message', '')
+                if 'already in progress' in error_message:
+                    print(f"Prompt content generation for video ID {video_id} is already in progress. Skipping generation.")
+                    return None
+                elif 'already exists' in error_message:
+                    print(f"Prompt content for video ID {video_id} already exists. Skipping generation.")
+                    return None
+                else:
+                    print(f"Conflict error for video ID {video_id}: {error_message}")
+                    raise Exception(f"Conflict error: {error_message}")
+            elif response.status_code == 401:
+                print("Unauthorized error. Refreshing access token.")
+                self.vi_access_token = self.refresh_access_token()
+                #headers["Content-Type": "application/json"] = self.vi_access_token
+                params['accessToken'] = self.vi_access_token
+                print(f"New Access Token: {self.vi_access_token}")
+                response = requests.post(url, params=params)
+                print(f"New Response: {response}")
+                response.raise_for_status()
             elif response.status_code != 200:
                 response.raise_for_status()
 
             return response.json()
+        except requests.exceptions.HTTPError as e:
+            print(f"HTTPError: {e}")
+            raise
         except AttributeError as e:
             print(f"AttributeError: {e}")
+            raise
+        except Exception as e:
+            print(f"Exception: {e}")
             raise
 
     def get_collection_prompt_content(self, video_ids):
         '''
         Get prompt content for a collection of videos.
         '''
+        print(f"Uses Operations API - Getting prompt content for a collection of videos from client.get_collection_prompt_content(video_ids)...")
         prompt_content = {}
         for video_id in video_ids:
+            # 1. Check if prompt content already exists
+            existing_content = self.get_prompt_content_async(video_id, raise_on_not_found=False)
+            if existing_content is not None:
+                print(f"Prompt content for video ID {video_id} already exists, skipping generation.")
+                prompt_content[video_id] = existing_content
+                continue
+        
+            # 2. If no content, generate it
             try:
                 content = self.generate_prompt_content_async(video_id)
-                prompt_content[video_id] = content
+                if content is not None:
+                    prompt_content[video_id] = content
             except Exception as e:
                 print(f"Failed to generate prompt content for video ID {video_id}. Error: {e}")
 
@@ -365,26 +441,43 @@ class VideoIndexerClient:
         :param raise_on_not_found: If True, raises an exception if the prompt content is not found.
         :return: The prompt content for the video, otherwise None
         '''
-        self.get_account_async() # if account is not initialized, get it
+        print(f"Uses Operations API - Getting prompt content for video ID from client.get_prompt_content_async(video_id)...")
+        self.get_account_async()  # if account is not initialized, get it
 
         url = f'{self.consts.ApiEndpoint}/{self.account["location"]}/Accounts/{self.account["properties"]["accountId"]}/' + \
               f'Videos/{video_id}/PromptContent'
 
         headers = {
             "Content-Type": "application/json"
-            }
+        }
 
         params = {
             'accessToken': self.vi_access_token
         }
+        # Print the access token
+        print(f"Access Token: {self.vi_access_token}")
+        response = requests.get(url, params=params, headers=headers)
+        print(f"Response: {response}")
+        if response.status_code == 401:
+            print("Unauthorized error. Refreshing access token.")
+            self.vi_access_token = self.refresh_access_token()
+            params['accessToken'] = self.vi_access_token
+            headers["Authorization"] = "Bearer " + self.vi_access_token  # Add new access token to headers
+            print(f"New Access Token: {self.vi_access_token}")
+            response = requests.get(url, params=params, headers=headers)
+            print(f"New Response: {response}")
 
-        response = requests.get(url, params=params)
-        if not raise_on_not_found and response.status_code == 404:
-            return None
+        if response.status_code == 404:
+            if raise_on_not_found:
+                raise Exception(f"Prompt content not found for video ID {video_id}")
+            else:
+                return None
 
         response.raise_for_status()
 
-        return response.json()
+        prompt_content = response.json()
+        print(f"Prompt content for video ID {video_id}: {prompt_content}")
+        return prompt_content
 
     def get_prompt_content(self, video_id: str, timeout_sec: Optional[int] = 60, check_alreay_exists: bool = True) -> dict:
         '''
@@ -432,6 +525,7 @@ class VideoIndexerClient:
         :param check_already_exists: If True, checks if the prompt content already exists
         :return: The prompt content for the videos
         '''
+        print(f"Uses Operations API - Getting prompt content for a collection of videos from client.get_collection_prompt_content(video_ids)...")
         # Avoid modifying the input while iterating
         videos_ids = videos_ids.copy()
 
@@ -541,6 +635,7 @@ class VideoIndexerClient:
         '''
         List all videos in the Video Indexer account.
         '''
+        print("Uses Operations API...Listing all videos in the account for client.list_videos...")
         self.get_account_async()  # Ensure the account is initialized
 
         url = f'{self.consts.ApiEndpoint}/{self.account["location"]}/Accounts/{self.account["properties"]["accountId"]}/Videos'
