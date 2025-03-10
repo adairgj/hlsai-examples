@@ -106,7 +106,7 @@ The repo includes sample data so it's ready to try end-to-end. The sample we use
       pip install -r .\app\backend\requirements.txt
       ```
 
-   1. Create a `.env` file that holds your Azure AI Video Indexer, Azure OpenAI, Azure Blob details (taken from Azure portal) in the following format:
+   1. Create a `.env` file in VideoQnA-Demo directory that holds your Azure AI Video Indexer, Azure OpenAI, Azure Blob details (taken from Azure portal) in the following format:
 
       ```
       AccountName='YOUR_VI_ACCOUNT_NAME' # This is the name of your Azure AI Video Indexer account.
