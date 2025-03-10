@@ -411,3 +411,4 @@ local.properties
 # SSH files
 ##############################
 **/*id_rsa*
+VideoQnA-Demo/.env
